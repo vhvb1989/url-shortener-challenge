@@ -38,5 +38,11 @@ module.exports = mongo.model('Url', new mongoose.Schema({
     type: Boolean,
     required: true,
     default: true
-  }
+  },
+
+  visitCounter: {
+    type: Number,
+    required: true,
+    default: 1,
+  },
 }));

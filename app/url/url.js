@@ -1,32 +1,37 @@
 const uuidv4 = require('uuid/v4');
+const hash = require('object-hash');
 const { domain } = require('../../environment');
 const SERVER = `${domain.protocol}://${domain.host}`;
 
-const UrlModel = require('./schema');
+const UrlModel= require('./schema');
 const parseUrl = require('url').parse;
 const validUrl = require('valid-url');
 
+const HASHING_ALGORITH = 'md5';
+const ENCODING = 'base64'
+
 /**
- * Lookup for existant, active shortened URLs by hash.
+ * Lookup for existent, active shortened URLs by hash.
  * 'null' will be returned when no matches were found.
  * @param {string} hash
  * @returns {object}
  */
 async function getUrl(hash) {
-  let source = await UrlModel.findOne({ active: true, hash });
+  let source = await UrlModel.findOne({ hash });
   return source;
 }
 
 /**
  * Generate an unique hash-ish- for an URL.
- * TODO: Deprecated the use of UUIDs.
- * TODO: Implement a shortening algorithm
+ * Using library object-hash from network: https://www.npmjs.com/package/object-hash
+ * It will ensure unique hash per project is created and encoded with base64 to have fixed length
  * @param {string} id
  * @returns {string} hash
  */
 function generateHash(url) {
-  // return uuidv5(url, uuidv5.URL);
-  return uuidv4();
+  const urlHash = hash(url, { algorithm: HASHING_ALGORITH, encoding: ENCODING });
+  // swap any `/` char for `-` to avoid crashing url parameters
+  return urlHash.replace('/','-');
 }
 
 /**
@@ -35,6 +40,19 @@ function generateHash(url) {
  */
 function generateRemoveToken() {
   return uuidv4();
+}
+
+/**
+ * Wraps a public response for after creating and for querying
+ */
+function getPublicResponse({url, hash, removeToken, visitCounter}) {
+  return {
+    url,
+    shorten: `${SERVER}/${hash}`,
+    hash,
+    removeUrl: `${SERVER}/${hash}/remove/${removeToken}`,
+    visits: `${visitCounter} visits recorded`,
+  };
 }
 
 /**
@@ -72,16 +90,19 @@ async function shorten(url, hash) {
     active: true
   });
 
-  const saved = await shortUrl.save();
-  // TODO: Handle save errors
+  const saved = await shortUrl.save().catch(e => {
+    if (e.code === 11000) {
+      // duplicated key, db already has this hash, just return it
+      return true;
+    }
+    return new Error('Unable to persist into DB', e);
+  });
 
-  return {
-    url,
-    shorten: `${SERVER}/${hash}`,
-    hash,
-    removeUrl: `${SERVER}/${hash}/remove/${removeToken}`
-  };
+  if (saved instanceof Error) {
+    throw saved;
+  }
 
+  return getPublicResponse(saved);
 }
 
 /**
@@ -93,10 +114,52 @@ function isValid(url) {
   return validUrl.isUri(url);
 }
 
+/**
+ * Register a visit for this url
+ */
+async function registerVisit(source) {
+  const updatedSource = await UrlModel
+  .findOneAndUpdate({ 'hash': source.hash }, { $set: { 'visitCounter': source.visitCounter + 1 }}, { new: true })
+  .catch(() => null);
+
+  return updatedSource;
+}
+
+/**
+ * Mark url as deleted
+ */
+async function deleteUrl(source) {
+    const updatedSource = await UrlModel
+      .updateOne({ 'hash': source.hash }, { $set: { 'active': false, removedAt: Date.now() }})
+      .catch(() => null);
+
+    return updatedSource;
+}
+
+/**
+ * Mark url as active again
+ */
+async function enableUrl(source) {
+  // Generate a new token for removing
+  const updatedSource = await UrlModel
+    .findOneAndUpdate(
+      { 'hash': source.hash },
+      { $set: { 'active': true, createdAt: Date.now(), visitCounter: 1, removeToken: generateRemoveToken() }},
+      { new: true }
+    )
+    .catch(() => null);
+
+  return getPublicResponse(updatedSource);
+}
+
 module.exports = {
   shorten,
   getUrl,
   generateHash,
   generateRemoveToken,
-  isValid
+  isValid,
+  getPublicResponse,
+  registerVisit,
+  deleteUrl,
+  enableUrl,
 }
