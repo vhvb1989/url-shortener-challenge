@@ -11,5 +11,8 @@
       "error",
       "module.exports"
     ]
+  },
+  "env": {
+    "jest": true
   }
 }

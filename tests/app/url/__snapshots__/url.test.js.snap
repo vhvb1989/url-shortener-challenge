@@ -1,0 +1,35 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`urlTests generateHash Should contain special character to replace slash 1`] = `"gKycQDYc8D5tSY+C5W2-6g=="`;
+
+exports[`urlTests getPublicResponse should remove any extra field from object 1`] = `
+Object {
+  "hash": "someHash",
+  "removeUrl": "https://localhost/someHash/remove/someToken",
+  "shorten": "https://localhost/someHash",
+  "url": "someUrl",
+  "visits": "10 visits recorded",
+}
+`;
+
+exports[`urlTests getUrl should return a valid response object 1`] = `
+Object {
+  "hash": "someFakeHashFound",
+}
+`;
+
+exports[`urlTests getUrl should return null when hash is not found 1`] = `null`;
+
+exports[`urlTests shorten should return public response when insert is success 1`] = `
+Object {
+  "hash": "someHash",
+  "removeUrl": "https://localhost/someHash/remove/someToken",
+  "shorten": "https://localhost/someHash",
+  "url": "someUrl",
+  "visits": "10 visits recorded",
+}
+`;
+
+exports[`urlTests shorten should throw error if not valid url is provided 1`] = `[Error: Invalid URL]`;
+
+exports[`urlTests shorten should throw error when insert returns as Error 1`] = `[Error: Unable to persist into DB]`;
