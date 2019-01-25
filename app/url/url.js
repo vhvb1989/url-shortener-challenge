@@ -12,13 +12,14 @@ const ENCODING = 'base64';
 
 /**
  * **********  Dictionary state (in-memory only) for custom shorting implementation
+ * TODO: Move Counters and map to DB to persist the zookeeper
  */
 const DOMAIN_MAP = new Map();
-let DOMAIN_COUNTER = 11; // we use Hex, so 10 would be start with a
+let DOMAIN_COUNTER = 10; // we use Hex, so 10 would be start with a
 const PROTOCOL_MAP = new Map();
-let PROTOCOL_COUNTER = 11;  // Counters are used to keep the next ID to use for a new HASH
+let PROTOCOL_COUNTER = 10;  // Counters are used to keep the next ID to use for a new HASH
 const PATH_MAP = new Map();
-let PATH_COUNTER = 11;
+let PATH_COUNTER = 10;
 const COMPONENTS = {
   DOMAIN: 1, PROTOCOL: 2, PATH: 3
 };
