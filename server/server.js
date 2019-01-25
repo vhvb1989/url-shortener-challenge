@@ -73,5 +73,6 @@ function onListening() {
   const bind = typeof addr === 'string'
     ? 'pipe ' + addr
     : 'port ' + addr.port;
-  console.log('Listening on ' + bind);
+  // disabling next line from lint since we want to tell users about server is up and listening
+  console.log('Listening on ' + bind);  // eslint-disable-line
 }

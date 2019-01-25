@@ -4,8 +4,9 @@
   "description": "",
   "main": "server/server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "nodemon"
+    "test": "./node_modules/.bin/eslint ./ && DOMAIN_PROTOCOL='https' DOMAIN_HOST='localhost' ./node_modules/.bin/jest",
+    "start": "nodemon",
+    "customImplementation": "CUSTOM_IMPLEMENTATION=true nodemon"
   },
   "author": "",
   "license": "ISC",
@@ -29,7 +30,9 @@
     "node": ">7.6.0"
   },
   "devDependencies": {
+    "enzyme-to-json": "^3.3.5",
     "eslint": "^4.9.0",
-    "eslint-plugin-node": "^5.2.0"
+    "eslint-plugin-node": "^5.2.0",
+    "jest": "^23.6.0"
   }
 }

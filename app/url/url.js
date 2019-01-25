@@ -1,14 +1,84 @@
 const uuidv4 = require('uuid/v4');
 const hash = require('object-hash');
-const { domain } = require('../../environment');
+const { domain, app } = require('../../environment');
 const SERVER = `${domain.protocol}://${domain.host}`;
 
-const UrlModel= require('./schema');
+const { findUrl, addVisitCounter, disableUrl, insertUrl, getUrlRecordForDb, reenableUrl } = require('./dbActions');
 const parseUrl = require('url').parse;
 const validUrl = require('valid-url');
 
 const HASHING_ALGORITH = 'md5';
-const ENCODING = 'base64'
+const ENCODING = 'base64';
+
+/**
+ * **********  Dictionary state (in-memory only) for custom shorting implementation
+ */
+const DOMAIN_MAP = new Map();
+let DOMAIN_COUNTER = 11; // we use Hex, so 10 would be start with a
+const PROTOCOL_MAP = new Map();
+let PROTOCOL_COUNTER = 11;  // Counters are used to keep the next ID to use for a new HASH
+const PATH_MAP = new Map();
+let PATH_COUNTER = 11;
+const COMPONENTS = {
+  DOMAIN: 1, PROTOCOL: 2, PATH: 3
+};
+
+const getCounter = component => {
+  switch(component) {
+    case COMPONENTS.DOMAIN:
+      return DOMAIN_COUNTER;
+    case COMPONENTS.PATH:
+      return PATH_COUNTER;
+    case COMPONENTS.PROTOCOL:
+      return PROTOCOL_COUNTER;
+  }
+}
+const incrementCounter = component => {
+  switch(component) {
+    case COMPONENTS.DOMAIN:
+      DOMAIN_COUNTER += 1;
+      return;
+    case COMPONENTS.PATH:
+      PATH_COUNTER += 1;
+      return;
+    case COMPONENTS.PROTOCOL:
+      PROTOCOL_COUNTER += 1;
+      return;
+  }
+}
+
+const getUrlComponents = url => {
+  // Get URL components for metrics sake
+  const urlComponents = parseUrl(url);
+  const protocol = urlComponents.protocol || '';
+  const domain = `${urlComponents.host || ''}${urlComponents.auth || ''}`;
+  const path = `${urlComponents.path || ''}${urlComponents.hash || ''}`;
+  return ({ protocol, domain, path });
+};
+
+const getHashFromMap = (map, key, component) => {
+  // get the hash of the key
+  const keyHash = hash(key);
+
+  // see if it is already in map
+  if (map.has(keyHash)) {
+    return map.get(keyHash);
+  }
+
+  // create new key for element with a hash
+  const currentKey = getCounter(component).toString(16);
+  map.set(keyHash, currentKey);
+  incrementCounter(component);
+  return currentKey;
+}
+
+const customHash = (url) => {
+  const { protocol, domain, path } = getUrlComponents(url);
+  const protocolId = getHashFromMap(PROTOCOL_MAP, protocol, COMPONENTS.PROTOCOL);
+  const domainId = getHashFromMap(DOMAIN_MAP, domain, COMPONENTS.DOMAIN);
+  const pathId = getHashFromMap(PATH_MAP, path, COMPONENTS.PATH);
+  return `${protocolId}${domainId}${pathId}`;
+};
 
 /**
  * Lookup for existent, active shortened URLs by hash.
@@ -17,7 +87,7 @@ const ENCODING = 'base64'
  * @returns {object}
  */
 async function getUrl(hash) {
-  let source = await UrlModel.findOne({ hash });
+  let source = await findUrl(hash);
   return source;
 }
 
@@ -26,12 +96,18 @@ async function getUrl(hash) {
  * Using library object-hash from network: https://www.npmjs.com/package/object-hash
  * It will ensure unique hash per project is created and encoded with base64 to have fixed length
  * @param {string} id
+ * @param {boolean} customMethod default to false if nothing is set up from env. It can be called with tru to had override (testing purposes)
  * @returns {string} hash
  */
-function generateHash(url) {
-  const urlHash = hash(url, { algorithm: HASHING_ALGORITH, encoding: ENCODING });
-  // swap any `/` char for `-` to avoid crashing url parameters
-  return urlHash.replace('/','-');
+function generateHash(url, customMethod = app.CUSTOM_IMPLEMENTATION || false) {
+  let urlHash;
+  if (customMethod) {
+    urlHash = customHash(url);
+  } else {
+    // swap any `/` char for `-` to avoid crashing url parameters
+    urlHash = hash(url, { algorithm: HASHING_ALGORITH, encoding: ENCODING }).replace('/','-');
+  }
+  return urlHash;
 }
 
 /**
@@ -70,33 +146,22 @@ async function shorten(url, hash) {
   }
 
   // Get URL components for metrics sake
-  const urlComponents = parseUrl(url);
-  const protocol = urlComponents.protocol || '';
-  const domain = `${urlComponents.host || ''}${urlComponents.auth || ''}`;
-  const path = `${urlComponents.path || ''}${urlComponents.hash || ''}`;
+  const { protocol, domain, path } = getUrlComponents(url);
 
   // Generate a token that will alow an URL to be removed (logical)
   const removeToken = generateRemoveToken();
 
   // Create a new model instance
-  const shortUrl = new UrlModel({
+  const newUrlDbRecord = await getUrlRecordForDb({
     url,
     protocol,
     domain,
     path,
     hash,
-    isCustom: false,
     removeToken,
-    active: true
   });
 
-  const saved = await shortUrl.save().catch(e => {
-    if (e.code === 11000) {
-      // duplicated key, db already has this hash, just return it
-      return true;
-    }
-    return new Error('Unable to persist into DB', e);
-  });
+  const saved = await insertUrl(newUrlDbRecord);
 
   if (saved instanceof Error) {
     throw saved;
@@ -118,10 +183,7 @@ function isValid(url) {
  * Register a visit for this url
  */
 async function registerVisit(source) {
-  const updatedSource = await UrlModel
-  .findOneAndUpdate({ 'hash': source.hash }, { $set: { 'visitCounter': source.visitCounter + 1 }}, { new: true })
-  .catch(() => null);
-
+  const updatedSource = await addVisitCounter(source);
   return updatedSource;
 }
 
@@ -129,10 +191,7 @@ async function registerVisit(source) {
  * Mark url as deleted
  */
 async function deleteUrl(source) {
-    const updatedSource = await UrlModel
-      .updateOne({ 'hash': source.hash }, { $set: { 'active': false, removedAt: Date.now() }})
-      .catch(() => null);
-
+    const updatedSource = await disableUrl(source);
     return updatedSource;
 }
 
@@ -141,14 +200,7 @@ async function deleteUrl(source) {
  */
 async function enableUrl(source) {
   // Generate a new token for removing
-  const updatedSource = await UrlModel
-    .findOneAndUpdate(
-      { 'hash': source.hash },
-      { $set: { 'active': true, createdAt: Date.now(), visitCounter: 1, removeToken: generateRemoveToken() }},
-      { new: true }
-    )
-    .catch(() => null);
-
+  const updatedSource = await reenableUrl(source, generateRemoveToken());
   return getPublicResponse(updatedSource);
 }
 

@@ -13,5 +13,8 @@ module.exports = {
     USER: process.env.MONGO_DB_USER,
     PASS: process.env.MONGO_DB_PASS,
     AUTH: process.env.MONGO_DB_AUTH,
-  }
+  },
+  app: {
+    CUSTOM_IMPLEMENTATION: process.env.CUSTOM_IMPLEMENTATION,
+  },
 };
